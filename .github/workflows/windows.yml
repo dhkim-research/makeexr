@@ -58,7 +58,8 @@ jobs:
           "exit code $($p.ExitCode)"
           Get-ChildItem "drop 폴더" | Format-Table Name, Length
           if ($p.ExitCode -ne 0) { throw "makeexr failed" }
-          build/exrdump.exe "drop 폴더/second.exr" > dump_second.txt
+          Copy-Item "drop 폴더/second.exr" second.exr   # exrdump takes ASCII paths only
+          build/exrdump.exe second.exr > dump_second.txt
           python tests/check.py test.hdr dump_second.txt
           if ($LASTEXITCODE -ne 0) { throw "values differ (second dropped file)" }
           Copy-Item "drop 폴더/첫째.exr" first.exr
