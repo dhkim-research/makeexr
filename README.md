@@ -16,7 +16,7 @@ makeexr input.hdr output.exr
 
 Both forms give the same file. In **Windows PowerShell 5** (the PowerShell that comes with
 Windows) use the second form: its `>` re-encodes program output as text and breaks binary files.
-In the Command Prompt (cmd) both forms work.
+In the Command Prompt (cmd) and in PowerShell 7 both forms work.
 
 makeexr.exe is a single file: OpenEXR is built in, and nothing else (Radiance, OpenEXR,
 Visual C++ runtime) has to be installed.
