@@ -30,15 +30,30 @@ jobs:
           # cmd.exe redirection, the usage the README shows
           cmd /c "build\makeexr.exe test.hdr > redirected.exr"
           if ($LASTEXITCODE -ne 0) { throw "makeexr failed" }
-          # output file as the second argument, with a non-ASCII name and a space
+          # output file as the second argument: same bytes as the redirected output
+          build/makeexr.exe test.hdr file.exr
+          if ($LASTEXITCODE -ne 0) { throw "makeexr failed" }
+          if ((Get-FileHash redirected.exr).Hash -ne (Get-FileHash file.exr).Hash) { throw "the two outputs differ" }
+          # non-ASCII names with a space (the EXR comment then names this file, so compare pixels)
           Copy-Item test.hdr "테스트 사진.hdr"
           build/makeexr.exe "테스트 사진.hdr" "결과 사진.exr"
-          if ($LASTEXITCODE -ne 0) { throw "makeexr failed" }
-          if ((Get-FileHash redirected.exr).Hash -ne (Get-FileHash "결과 사진.exr").Hash) { throw "the two outputs differ" }
+          if ($LASTEXITCODE -ne 0) { throw "makeexr failed with a Korean file name" }
+          build/exrdump.exe "결과 사진.exr" > dump_korean.txt
           build/exrdump.exe redirected.exr > dump.txt
           Get-Content dump.txt -TotalCount 7
           python tests/check.py test.hdr dump.txt
           if ($LASTEXITCODE -ne 0) { throw "values differ" }
+          python tests/check.py test.hdr dump_korean.txt
+          if ($LASTEXITCODE -ne 0) { throw "values differ (Korean file name)" }
+      - name: Redirection in PowerShell (information only)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          build/makeexr.exe test.hdr > ps7.exr
+          powershell.exe -NoProfile -Command "build\makeexr.exe test.hdr > ps5.exr"
+          $ref = (Get-FileHash file.exr).Hash
+          "PowerShell $($PSVersionTable.PSVersion) '>': " + $(if ((Get-FileHash ps7.exr).Hash -eq $ref) { "same bytes" } else { "different bytes" })
+          "Windows PowerShell 5.1 '>': " + $(if ((Get-FileHash ps5.exr).Hash -eq $ref) { "same bytes" } else { "different bytes" })
       - uses: actions/upload-artifact@v4
         with:
           name: makeexr-windows-x64
