@@ -38,7 +38,8 @@ jobs:
           Copy-Item test.hdr "테스트 사진.hdr"
           build/makeexr.exe "테스트 사진.hdr" "결과 사진.exr"
           if ($LASTEXITCODE -ne 0) { throw "makeexr failed with a Korean file name" }
-          build/exrdump.exe "결과 사진.exr" > dump_korean.txt
+          Copy-Item "결과 사진.exr" korean.exr   # exrdump (a test helper) takes ASCII names only
+          build/exrdump.exe korean.exr > dump_korean.txt
           build/exrdump.exe redirected.exr > dump.txt
           Get-Content dump.txt -TotalCount 7
           python tests/check.py test.hdr dump.txt
