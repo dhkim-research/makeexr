@@ -9,17 +9,27 @@ absolute values that can be used directly, for example in MATLAB.
 
 ## Use
 
+Download `makeexr.exe` from the [latest release](https://github.com/dhkim-research/makeexr/releases/latest).
+There is nothing to install: it is a single file (OpenEXR is built in; Radiance, OpenEXR and the
+Visual C++ runtime are not needed). Windows may show a SmartScreen warning the first time
+("More info" → "Run anyway"), because the program is not code-signed.
+
+**Without a terminal:** drag one or more `.hdr` files onto `makeexr.exe`. Each one is converted
+to an `.exr` with the same name in the same folder; the window shows the result and closes when
+you press Enter.
+
+**In a terminal:**
+
 ```
-makeexr input.hdr > output.exr
 makeexr input.hdr output.exr
+makeexr input.hdr > output.exr
+makeexr a.hdr b.hdr c.hdr          # writes a.exr, b.exr, c.exr next to the inputs
 ```
 
-Both forms give the same file. In **Windows PowerShell 5** (the PowerShell that comes with
-Windows) use the second form: its `>` re-encodes program output as text and breaks binary files.
-In the Command Prompt (cmd) and in PowerShell 7 both forms work.
-
-makeexr.exe is a single file: OpenEXR is built in, and nothing else (Radiance, OpenEXR,
-Visual C++ runtime) has to be installed.
+In PowerShell, start it as `.\makeexr` when makeexr.exe is in the current folder. In
+**Windows PowerShell 5** (the PowerShell that comes with Windows) use the first form: its `>`
+re-encodes program output as text and breaks binary files. In the Command Prompt (cmd) and in
+PowerShell 7 every form works.
 
 ## Reading the result in MATLAB
 

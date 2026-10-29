@@ -46,6 +46,25 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "values differ" }
           python tests/check.py test.hdr dump_korean.txt
           if ($LASTEXITCODE -ne 0) { throw "values differ (Korean file name)" }
+      - name: Files dropped on makeexr.exe (own console window, several files)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory "drop 폴더" | Out-Null
+          Copy-Item test.hdr "drop 폴더/첫째.hdr"; Copy-Item test.hdr "drop 폴더/second.hdr"
+          Set-Content enter.txt ""
+          $a = (Resolve-Path "drop 폴더/첫째.hdr").Path; $b = (Resolve-Path "drop 폴더/second.hdr").Path
+          # Explorer starts the program in a new console with the dropped paths; Enter closes it
+          $p = Start-Process build/makeexr.exe -ArgumentList "`"$a`" `"$b`"" -RedirectStandardInput enter.txt -Wait -PassThru
+          "exit code $($p.ExitCode)"
+          Get-ChildItem "drop 폴더" | Format-Table Name, Length
+          if ($p.ExitCode -ne 0) { throw "makeexr failed" }
+          build/exrdump.exe "drop 폴더/second.exr" > dump_second.txt
+          python tests/check.py test.hdr dump_second.txt
+          if ($LASTEXITCODE -ne 0) { throw "values differ (second dropped file)" }
+          Copy-Item "drop 폴더/첫째.exr" first.exr
+          build/exrdump.exe first.exr > dump_drop.txt
+          python tests/check.py test.hdr dump_drop.txt
+          if ($LASTEXITCODE -ne 0) { throw "values differ (dropped file)" }
       - name: Redirection in PowerShell (information only)
         shell: pwsh
         continue-on-error: true

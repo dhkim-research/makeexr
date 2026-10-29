@@ -18,6 +18,7 @@
 #include <ImfThreading.h>
 
 #include <algorithm>
+#include <cctype>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -33,6 +34,9 @@
 #include <vector>
 
 #if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
 #include <fcntl.h>
 #include <io.h>
 #else
@@ -43,7 +47,7 @@ namespace fs = std::filesystem;
 
 namespace {
 
-const char *kVersion = "1.0.0";
+const char *kVersion = "1.1.0";
 const double kWhiteEfficacy = 179.0;  // lm/W, Radiance's luminous efficacy of equal-energy white
 
 const std::array<double, 8> kRadiancePrimaries = {0.640, 0.330, 0.290, 0.600, 0.150, 0.060, 1.0 / 3, 1.0 / 3};
@@ -148,10 +152,14 @@ void usage(std::ostream &out) {
     out << "makeexr " << kVersion << "\n"
         << "Converts a Radiance HDR picture into an OpenEXR file with the channels X, Y and Z:\n"
         << "CIE 1931 XYZ in cd/m^2, 32-bit float, ZIP compression.\n\n"
-        << "Usage:\n"
+        << "Without a terminal: drag one or more .hdr files onto makeexr.exe. Each one is\n"
+        << "converted to an .exr with the same name in the same folder.\n\n"
+        << "In a terminal:\n"
+        << "  makeexr input.hdr output.exr\n"
         << "  makeexr input.hdr > output.exr\n"
-        << "  makeexr input.hdr output.exr\n\n"
-        << "In Windows PowerShell 5 use the second form; its '>' changes binary output.\n\n"
+        << "  makeexr a.hdr b.hdr ...        (writes a.exr, b.exr, ... next to the inputs)\n"
+        << "In PowerShell type .\\makeexr if makeexr.exe is in the current folder, and in\n"
+        << "Windows PowerShell 5 use the first form; its '>' changes binary output.\n\n"
         << "The colour space comes from the PRIMARIES= line (Radiance primaries if there is none),\n"
         << "or FORMAT=32-bit_rle_xyze. Values are multiplied by 179 and divided by the product\n"
         << "of the EXPOSURE= lines, so Y is luminance in cd/m^2. Not multiplied by 179: XYZE\n"
@@ -161,31 +169,8 @@ void usage(std::ostream &out) {
         << "  xyz = exrread(\"output.exr\", Channels=[\"X\",\"Y\",\"Z\"]);\n";
 }
 
-int run(const std::vector<std::string> &args, const std::vector<fs::path> &paths) {
-    if (args.size() == 2 && (args[1] == "-h" || args[1] == "--help" || args[1] == "/?")) {
-        usage(std::cout);
-        return 0;
-    }
-    if (args.size() == 2 && (args[1] == "-v" || args[1] == "--version")) {
-        std::cout << "makeexr " << kVersion << "\n";
-        return 0;
-    }
-    if (args.size() < 2 || args.size() > 3) {
-        usage(std::cerr);
-        return 2;
-    }
-    const fs::path inputPath = paths[1];
-    const bool toStdout = args.size() == 2;
-#if defined(_WIN32)
-    const bool stdoutIsTerminal = _isatty(_fileno(stdout)) != 0;
-#else
-    const bool stdoutIsTerminal = isatty(STDOUT_FILENO) != 0;
-#endif
-    if (toStdout && stdoutIsTerminal) {
-        std::cerr << "makeexr: give an output file, or redirect: makeexr input.hdr > output.exr\n";
-        return 2;
-    }
-
+// Converts one picture. An empty outputPath writes the EXR to stdout.
+void convert(const fs::path &inputPath, const fs::path &outputPath) {
     const RadiancePicture pic = readRadiance(readFile(inputPath));
 
     // Colour space of the stored values.
@@ -210,7 +195,8 @@ int run(const std::vector<std::string> &args, const std::vector<fs::path> &paths
     } else if (assigned.rfind("xyz", 0) == 0) {
         primaries = kXyzPrimaries;
     } else if (assigned.empty()) {
-        std::cerr << "makeexr: note: no PRIMARIES in the header; Radiance RGB primaries are assumed.\n";
+        std::cerr << "makeexr: note: no PRIMARIES in the header of " << inputPath.filename().u8string()
+                  << "; Radiance RGB primaries are assumed.\n";
     }
     if (samePrimaries(primaries, kXyzPrimaries))
         space = "XYZ";
@@ -254,9 +240,7 @@ int run(const std::vector<std::string> &args, const std::vector<fs::path> &paths
         radianceHeader += line + "\n";
     header.insert("radianceHeader", Imf::StringAttribute(radianceHeader));
 
-    Imf::setGlobalThreadCount(static_cast<int>(std::max(1u, std::thread::hardware_concurrency())));
-
-    if (toStdout) {
+    if (outputPath.empty()) {
         MemoryOStream memory;
         writeExr(memory, header, xyz, pic.width, pic.height);
 #if defined(_WIN32)
@@ -266,7 +250,6 @@ int run(const std::vector<std::string> &args, const std::vector<fs::path> &paths
         if (std::fwrite(bytes.data(), 1, bytes.size(), stdout) != bytes.size() || std::fflush(stdout) != 0)
             throw std::runtime_error("writing to the output failed");
     } else {
-        const fs::path outputPath = paths[2];
         std::ofstream out(outputPath, std::ios::binary | std::ios::trunc);
         if (!out)
             throw std::runtime_error("cannot create " + outputPath.u8string());
@@ -279,30 +262,118 @@ int run(const std::vector<std::string> &args, const std::vector<fs::path> &paths
             throw std::runtime_error("writing " + outputPath.u8string() + " failed");
     }
     std::cerr << inputPath.filename().u8string() << ": " << pic.width << " x " << pic.height << ", "
-              << space << ", EXPOSURE " << pic.exposure << " -> X Y Z in cd/m^2 (max Y "
-              << maxY << ")\n";
-    return 0;
+              << space << ", EXPOSURE " << pic.exposure << " -> X Y Z in cd/m^2 (max Y " << maxY << ")";
+    if (!outputPath.empty())
+        std::cerr << " -> " << outputPath.filename().u8string();
+    std::cerr << "\n";
+}
+
+bool hasExtension(const fs::path &path, const char *extension) {
+    std::string e = path.extension().u8string();
+    for (char &c : e)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return e == extension;
+}
+
+// True when makeexr has its own console window, i.e. it was started by double-clicking it
+// or by dropping files on it (not from a terminal). The window then stays open at the end.
+bool ownConsoleWindow() {
+#if defined(_WIN32)
+    DWORD processes[2];
+    return GetConsoleProcessList(processes, 2) == 1;
+#else
+    return false;
+#endif
+}
+
+int run(const std::vector<std::string> &args, const std::vector<fs::path> &paths) {
+    if (args.size() == 2 && (args[1] == "-h" || args[1] == "--help" || args[1] == "/?")) {
+        usage(std::cout);
+        return 0;
+    }
+    if (args.size() == 2 && (args[1] == "-v" || args[1] == "--version")) {
+        std::cout << "makeexr " << kVersion << "\n";
+        return 0;
+    }
+    if (args.size() < 2) {
+        usage(std::cerr);
+        return 2;
+    }
+#if defined(_WIN32)
+    const bool stdoutIsTerminal = _isatty(_fileno(stdout)) != 0;
+#else
+    const bool stdoutIsTerminal = isatty(STDOUT_FILENO) != 0;
+#endif
+    Imf::setGlobalThreadCount(static_cast<int>(std::max(1u, std::thread::hardware_concurrency())));
+
+    // makeexr input.hdr output.exr
+    if (args.size() == 3 && hasExtension(paths[2], ".exr") && !hasExtension(paths[1], ".exr")) {
+        convert(paths[1], paths[2]);
+        return 0;
+    }
+    // makeexr input.hdr > output.exr
+    if (args.size() == 2 && !stdoutIsTerminal) {
+        convert(paths[1], fs::path());
+        return 0;
+    }
+    // makeexr a.hdr b.hdr ... (also files dropped on makeexr.exe): a.exr, b.exr, ... next to them
+    int failed = 0;
+    for (size_t i = 1; i < paths.size(); ++i) {
+        try {
+            fs::path output = paths[i];
+            output.replace_extension(".exr");
+            if (output == paths[i])
+                throw std::runtime_error("the input is already an .exr file");
+            convert(paths[i], output);
+        } catch (const std::exception &e) {
+            std::cerr << "makeexr: " << paths[i].filename().u8string() << ": " << e.what() << "\n";
+            ++failed;
+        }
+    }
+    if (paths.size() > 2)
+        std::cerr << (paths.size() - 1 - failed) << " of " << (paths.size() - 1) << " files converted.\n";
+    return failed ? 1 : 0;
 }
 
 }  // namespace
 
+int runAndKeepWindow(const std::vector<std::string> &args, const std::vector<fs::path> &paths) {
+    const bool keepWindow = ownConsoleWindow();
+    int rc;
+    if (keepWindow && args.size() < 2) {
+        usage(std::cout);
+        rc = 0;
+    } else {
+        try {
+            rc = run(args, paths);
+        } catch (const std::exception &e) {
+            std::cerr << "makeexr: " << e.what() << "\n";
+            rc = 1;
+        }
+    }
+    if (keepWindow) {
+        std::cout << "\nPress Enter to close this window." << std::flush;
+        std::string line;
+        std::getline(std::cin, line);
+    }
+    return rc;
+}
+
 #if defined(_WIN32)
 int wmain(int argc, wchar_t **argv) {
+    SetConsoleOutputCP(CP_UTF8);   // file names with Korean and other characters
     std::vector<std::string> args;
     std::vector<fs::path> paths;
     for (int i = 0; i < argc; ++i) {
         paths.emplace_back(argv[i]);
         args.push_back(paths.back().u8string());
     }
+    return runAndKeepWindow(args, paths);
+}
 #else
 int main(int argc, char **argv) {
     std::vector<std::string> args(argv, argv + argc);
     std::vector<fs::path> paths(argv, argv + argc);
-#endif
-    try {
-        return run(args, paths);
-    } catch (const std::exception &e) {
-        std::cerr << "makeexr: " << e.what() << "\n";
-        return 1;
-    }
+    return runAndKeepWindow(args, paths);
 }
+#endif
