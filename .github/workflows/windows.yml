@@ -1,0 +1,48 @@
+name: Windows build
+
+# Builds makeexr.exe (OpenEXR and the C runtime linked statically, so it runs on any
+# 64-bit Windows without installing anything) and checks the conversion numerically.
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DMAKEEXR_BUILD_TESTS=ON
+          cmake --build build
+      - name: Only system DLLs are needed
+        shell: pwsh
+        run: |
+          $deps = dumpbin /dependents build/makeexr.exe | Select-String '\.dll' | ForEach-Object { $_.ToString().Trim() }
+          $deps
+          $other = $deps | Where-Object { $_ -notmatch '^(KERNEL32|ADVAPI32|USER32|api-ms-win-.*|ucrtbase|WS2_32|bcrypt|SHELL32|ole32)\.dll$' }
+          if ($other) { throw "unexpected DLL dependencies: $other" }
+      - name: Convert and check the values
+        shell: pwsh
+        run: |
+          python tests/make_test_hdr.py test.hdr
+          # cmd.exe redirection, the usage the README shows
+          cmd /c "build\makeexr.exe test.hdr > redirected.exr"
+          if ($LASTEXITCODE -ne 0) { throw "makeexr failed" }
+          # output file as the second argument, with a non-ASCII name and a space
+          Copy-Item test.hdr "테스트 사진.hdr"
+          build/makeexr.exe "테스트 사진.hdr" "결과 사진.exr"
+          if ($LASTEXITCODE -ne 0) { throw "makeexr failed" }
+          if ((Get-FileHash redirected.exr).Hash -ne (Get-FileHash "결과 사진.exr").Hash) { throw "the two outputs differ" }
+          build/exrdump.exe redirected.exr > dump.txt
+          Get-Content dump.txt -TotalCount 7
+          python tests/check.py test.hdr dump.txt
+          if ($LASTEXITCODE -ne 0) { throw "values differ" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: makeexr-windows-x64
+          path: |
+            build/makeexr.exe
+            README.md
+            LICENSE

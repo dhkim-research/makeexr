@@ -1,0 +1,3 @@
+build/
+*.exr
+.DS_Store
